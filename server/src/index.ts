@@ -9,20 +9,34 @@ import fs from 'fs';
 import { Canvas, Image, loadImage } from 'canvas';
 import CanvasGrid from 'merge-images-grid';
 import { readFilesFromDir, downloadImageFromUrl } from './file';
+import sharp from 'sharp';
 
 const hashtag = '#WeAreOkay';
 const fetch = false;
 
 async function mergeImages() {
   // Fetch raw Images
-  const rawImagesData = await readFilesFromDir(config.app.outImagesPath);
-  const rawImages: Uint8Array[] = [];
-  for (const key in rawImagesData) rawImages.push(rawImagesData[key]);
+  const rawImages = await readFilesFromDir(config.app.outImagesPath);
+  const imageBuffers: Buffer[] = [];
+  for (const key in rawImages) imageBuffers.push(Buffer.from(rawImages[key]));
+
+  // Resize Images
+  const resizedImageBuffers: Buffer[] = [];
+  for (const imageBuffer of imageBuffers) {
+    const resizedImage = await sharp(imageBuffer)
+      .resize({
+        fit: sharp.fit.cover,
+        width: 800,
+        height: 800,
+      })
+      .jpeg({ quality: 80 })
+      .toBuffer();
+    resizedImageBuffers.push(resizedImage);
+  }
 
   // Transform raw Images to Canvas-Images
   const images: { image: Image }[] = [];
-  for (const rawImage of rawImages) {
-    const imageBuffer = Buffer.from(rawImage);
+  for (const imageBuffer of resizedImageBuffers) {
     const image = await loadImage(imageBuffer);
     images.push({ image });
   }

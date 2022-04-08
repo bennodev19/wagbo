@@ -1,55 +1,113 @@
-import {TwitterApi} from 'twitter-api-v2';
+import {
+  MediaObjectV2,
+  TweetV2,
+  TwitterApi,
+  TwitterV2IncludesHelper,
+} from 'twitter-api-v2';
 import config from './config';
-import * as fs from "fs";
-import joinImages from "join-images";
-import {Canvas, Image, loadImage} from "canvas";
-import CanvasGrid from "merge-images-grid";
+import fs from 'fs';
+import { Canvas, Image, loadImage } from 'canvas';
+import CanvasGrid from 'merge-images-grid';
+import { readFilesFromDir, downloadImageFromUrl } from './file';
 
 const hashtag = '#WeAreOkay';
+const fetch = false;
+
+async function mergeImages() {
+  // Fetch raw Images
+  const rawImagesData = await readFilesFromDir(config.app.outImagesPath);
+  const rawImages: Uint8Array[] = [];
+  for (const key in rawImagesData) rawImages.push(rawImagesData[key]);
+
+  // Transform raw Images to Canvas-Images
+  const images: { image: Image }[] = [];
+  for (const rawImage of rawImages) {
+    const imageBuffer = Buffer.from(rawImage);
+    const image = await loadImage(imageBuffer);
+    images.push({ image });
+  }
+
+  // Merge Images
+  const merge = new CanvasGrid({
+    canvas: new Canvas(2, 2),
+    bgColor: '#19AB6D',
+    list: images,
+  });
+  const buffer = merge.canvas.toBuffer();
+
+  // Write Images
+  fs.writeFileSync(`${config.app.outPath}/demo.png`, buffer);
+}
+
+async function fetchImages(client: TwitterApi) {
+  // Fetch Tweets
+  // Query: https://developer.twitter.com/en/docs/twitter-api/tweets/counts/integrate/build-a-query
+  // Query Builder: https://developer.twitter.com/apitools/api?endpoint=%2F2%2Ftweets%2Fsearch%2Fall&method=get
+  const response = await client.v2.search(
+    //'#WeAreOkay has:media has:images -is:retweet',
+    '#WeAreOkay has:media has:images -is:retweet',
+    {
+      // https://developer.twitter.com/en/docs/twitter-api/data-dictionary/object-model/media
+      'media.fields': [
+        'media_key',
+        'preview_image_url',
+        'type',
+        'url',
+        'width',
+        'height',
+      ],
+      expansions: [
+        'entities.mentions.username',
+        'attachments.media_keys', // Required to fetch media
+      ],
+      start_time: '2022-04-07T00:00:00.000Z',
+      max_results: 10,
+    },
+  );
+
+  // Write raw Data Object for debugging and exploring the twitter api response
+  fs.writeFileSync(
+    `${config.app.outDataPath}/rawData.json`,
+    JSON.stringify(response, null, 2),
+    'utf-8',
+  );
+
+  // Extract Tweets and attach corresponding media
+  const tweets = response.tweets;
+  const includes = new TwitterV2IncludesHelper(response);
+  const tweetsWithMedia: {
+    tweet: TweetV2;
+    medias: MediaObjectV2[];
+  }[] = [];
+  for (const tweet of tweets) {
+    tweetsWithMedia.push({ tweet, medias: includes.medias(tweet) });
+  }
+
+  // Write 'tweetsWithMedia' Array for debugging
+  fs.writeFileSync(
+    `${config.app.outDataPath}/tweetsWithMedia.json`,
+    JSON.stringify(tweetsWithMedia, null, 2),
+    'utf-8',
+  );
+
+  // Fetch images from tweet and save it to local disk
+  for (const tweetWithMedia of tweetsWithMedia) {
+    for (const media of tweetWithMedia.medias) {
+      const url = media.url;
+      if (url != null) {
+        const name = url.substring(url.lastIndexOf('/')).replace('/', '');
+        await downloadImageFromUrl(url, name, config.app.outImagesPath);
+      }
+    }
+  }
+}
 
 async function main() {
-    // Instantiate Twitter API Client
-    const client = new TwitterApi(config.twitter.bearerToken || 'unknown');
+  // Instantiate Twitter API Client
+  const client = new TwitterApi(config.twitter.bearerToken || 'unknown');
 
-    // Merge Test
-    // https://stackoverflow.com/questions/17369842/tile-four-images-together-using-node-js-and-graphicsmagick
-    // https://www.youtube.com/watch?v=WtuJLcBvxI0
-    const imageNames = ['1.png', '2.png', '3.png', '4.png', '5.png', '6.png', '7.png', '8.png'];
-    const imagePaths = imageNames.map(imageName => `${config.app.outImagesPath}/${imageName}`);
-
-    joinImages(imagePaths).then((img) => {
-        // Save image as file
-        img.toFile(`${config.app.outPath}/out.png`);
-    });
-
-    const images: {image: Image}[] = [];
-    for(const path of imagePaths){
-        const buffer = await loadImage(path);
-        images.push({image: buffer});
-    }
-    const merge = new CanvasGrid({
-        canvas: new Canvas(2, 2),
-        bgColor: '#fff',
-        list: images,
-    })
-    const buffer = merge.canvas.toBuffer();
-    fs.writeFileSync(`${config.app.outPath}/demo.png`, buffer);
-
-    // // Query: https://developer.twitter.com/en/docs/twitter-api/tweets/counts/integrate/build-a-query
-    // // Builder: https://developer.twitter.com/apitools/api?endpoint=%2F2%2Ftweets%2Fsearch%2Fall&method=get
-    // const tweets = await client.v2.search(
-    //     //'#WeAreOkay has:media has:images -is:retweet',
-    //     '#WeAreOkay has:media has:images -is:retweet',
-    //     {
-    //         // https://developer.twitter.com/en/docs/twitter-api/data-dictionary/object-model/media
-    //         'media.fields': ['media_key', 'preview_image_url', 'type', 'url', 'alt_text', 'width', 'height'],
-    //         expansions: ['entities.mentions.username', "attachments.media_keys"],
-    //         max_results: 10,
-    //     }
-    // );
-    //
-    // // Write Data Objects
-    // fs.writeFileSync(`${config.app.outDataPath}/rawData.json`, JSON.stringify(tweets, null, 2) , 'utf-8');
+  if (fetch) await fetchImages(client);
+  await mergeImages();
 }
 
 main();

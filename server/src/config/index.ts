@@ -5,9 +5,11 @@ const ENVIRONMENT = process.env.NODE_ENV || 'local'; // https://stackoverflow.co
 dotenv.config({ path: `.env.${ENVIRONMENT}` });
 
 // Configs
+import appConfig from './app.config';
 import twitterConfig from './twitter.config';
 
 export const config = {
+    app: appConfig,
     twitter: twitterConfig,
 };
 

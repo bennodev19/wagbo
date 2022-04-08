@@ -12,7 +12,7 @@ import { readFilesFromDir, downloadImageFromUrl } from './file';
 import sharp from 'sharp';
 
 const hashtag = '#WeAreOkay';
-const fetch = false;
+const fetch = true;
 
 async function mergeImages() {
   // Fetch raw Images
@@ -53,13 +53,16 @@ async function mergeImages() {
   fs.writeFileSync(`${config.app.outPath}/demo.png`, buffer);
 }
 
-async function fetchImages(client: TwitterApi) {
+async function fetchImages(
+  client: TwitterApi,
+  options: FetchImagesOptionsType = {},
+) {
   // Fetch Tweets
   // Query: https://developer.twitter.com/en/docs/twitter-api/tweets/counts/integrate/build-a-query
   // Query Builder: https://developer.twitter.com/apitools/api?endpoint=%2F2%2Ftweets%2Fsearch%2Fall&method=get
   const response = await client.v2.search(
     //'#WeAreOkay has:media has:images -is:retweet',
-    '#WeAreOkay has:media has:images -is:retweet',
+    `${hashtag} has:media has:images -is:retweet`,
     {
       // https://developer.twitter.com/en/docs/twitter-api/data-dictionary/object-model/media
       'media.fields': [
@@ -74,8 +77,9 @@ async function fetchImages(client: TwitterApi) {
         'entities.mentions.username',
         'attachments.media_keys', // Required to fetch media
       ],
-      start_time: '2022-04-07T00:00:00.000Z',
-      max_results: 10,
+      // start_time: options.startTime,
+      // end_time: options.endTime,
+      // max_results: 1000,
     },
   );
 
@@ -89,10 +93,7 @@ async function fetchImages(client: TwitterApi) {
   // Extract Tweets and attach corresponding media
   const tweets = response.tweets;
   const includes = new TwitterV2IncludesHelper(response);
-  const tweetsWithMedia: {
-    tweet: TweetV2;
-    medias: MediaObjectV2[];
-  }[] = [];
+  const tweetsWithMedia: TweetsWithMediaType[] = [];
   for (const tweet of tweets) {
     tweetsWithMedia.push({ tweet, medias: includes.medias(tweet) });
   }
@@ -117,11 +118,20 @@ async function fetchImages(client: TwitterApi) {
 }
 
 async function main() {
-  // Instantiate Twitter API Client
   const client = new TwitterApi(config.twitter.bearerToken || 'unknown');
+  const startTime = new Date('01 April 2022').toISOString();
+  const endTime = new Date('07 April 2022').toISOString();
 
-  if (fetch) await fetchImages(client);
+  if (fetch)
+    await fetchImages(client, { startTime: startTime, endTime: endTime });
   await mergeImages();
 }
 
 main();
+
+type TweetsWithMediaType = {
+  tweet: TweetV2;
+  medias: MediaObjectV2[];
+};
+
+type FetchImagesOptionsType = { startTime?: string; endTime?: string };

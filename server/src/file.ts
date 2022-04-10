@@ -43,22 +43,73 @@ export const readFilesFromDir = async (
   return filesObject;
 };
 
+export const writeFile = async (
+  filepath: string,
+  data: Uint8Array | string,
+): Promise<void> => {
+  console.log('Info: Start Writing File', filepath);
+
+  // Create dir
+  const dirpath = filepath.substring(0, filepath.lastIndexOf('/'));
+  if (dirpath !== '' && !doesDirExist(dirpath)) {
+    await writeDir(dirpath);
+  }
+
+  return await new Promise((resolve, reject) => {
+    fs.writeFile(filepath, data, 'utf-8', (err) => {
+      if (err) {
+        console.log('Error: Writing File', filepath);
+        reject(err);
+      }
+      console.log('Info: End Writing File', filepath);
+      resolve(undefined);
+    });
+  });
+};
+
+export const writeDir = async (dirpath: string): Promise<void> => {
+  console.log('Info: Start Writing Dir', dirpath);
+
+  // Check whether dir already exists
+  if (doesDirExist(dirpath)) return Promise.resolve(undefined);
+
+  return await new Promise((resolve, reject) => {
+    fs.mkdir(dirpath, { recursive: true }, (err) => {
+      if (err) {
+        console.log('Error: Writing Dir', dirpath);
+        reject(err);
+      }
+      console.log('Info: End Writing Dir', dirpath);
+      resolve(undefined);
+    });
+  });
+};
+
+export const doesDirExist = (dirpath: string): boolean => {
+  return fs.existsSync(dirpath);
+};
+
 export async function downloadImageFromUrl(
   url: string,
   imageName: string,
-  imagePath: string,
+  imageDirPath: string,
 ) {
-  const path = `${imagePath}/${imageName}`;
+  const path = `${imageDirPath}/${imageName}`;
 
+  // Create dir
+  if (!doesDirExist(imageDirPath)) {
+    await writeDir(imageDirPath);
+  }
+
+  // Fetch Image and save it to dir
   const response = await axios({
     url,
     responseType: 'stream',
   });
-
   await new Promise((resolve, reject) => {
     response.data
       .pipe(fs.createWriteStream(path))
-      .on('finish', () => resolve(null))
+      .on('finish', () => resolve(undefined))
       .on('error', (e) => reject(e));
   });
 }

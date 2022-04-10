@@ -6,24 +6,30 @@ import {
   TwitterV2IncludesHelper,
 } from 'twitter-api-v2';
 import config from './config';
-import fs from 'fs';
 import { Canvas, Image, loadImage } from 'canvas';
 import CanvasGrid from 'merge-images-grid';
-import { readFilesFromDir, downloadImageFromUrl } from './file';
+import {
+  readFilesFromDir,
+  downloadImageFromUrl,
+  writeFile,
+  readFile,
+} from './file';
 import sharp from 'sharp';
 
-const hashtag = '#WeAreOkay';
-const fetch = false;
-
 async function mergeImages() {
-  console.log('Info: Start merging Images');
+  console.time('Info: Start fetching Images');
 
-  // Fetch raw Images
-  const rawImages = await readFilesFromDir(config.app.outImagesPath);
+  // Fetch raw images from local folder
+  let rawImages: { [p: string]: Uint8Array } = {};
+  try {
+    rawImages = await readFilesFromDir(config.app.outImagesPath);
+  } catch (e) {
+    console.log("Info: Couldn't find any image!");
+  }
   const imageBuffers: Buffer[] = [];
   for (const key in rawImages) imageBuffers.push(Buffer.from(rawImages[key]));
 
-  // Resize Images
+  // Resize images to arrange it better in the canvas later
   const resizedImageBuffers: Buffer[] = [];
   for (const imageBuffer of imageBuffers) {
     const resizedImage = await sharp(imageBuffer)
@@ -37,57 +43,79 @@ async function mergeImages() {
     resizedImageBuffers.push(resizedImage);
   }
 
-  // Transform raw Images to Canvas-Images
+  // Transform image buffers to Canvas-Images
   const images: { image: Image }[] = [];
   for (const imageBuffer of resizedImageBuffers) {
     const image = await loadImage(imageBuffer);
     images.push({ image });
   }
 
+  console.log('Info: End fetching Images');
+
   if (images.length > 0) {
-    // Strip some images to make it a square
+    // Strip some images to make final image a even square
     const colCount = Math.floor(Math.sqrt(images.length));
     const maxImagesCount = colCount * colCount;
-    console.log('Info: Merge Images', {
+    console.log('Info: Start merging Images', {
       imagesCount: images.length,
       colCount,
       maxImagesCount,
     });
 
-    // Merge Images
+    // Merge images to canvas grid
     const merge = new CanvasGrid({
       canvas: new Canvas(2, 2),
-      bgColor: '#19AB6D',
+      bgColor: config.app.bgColor,
       col: colCount,
       list: images.slice(0, maxImagesCount),
     });
     const buffer = merge.canvas.toBuffer();
 
-    // Write Images
-    fs.writeFileSync(`${config.app.outPath}/demo.jpeg`, buffer);
+    // Write merged image to local disk
+    await writeFile(`${config.app.outPath}/${config.app.imageName}`, buffer);
   }
 
-  console.log('Info: End merging Images');
+  console.time('Info: End merging Images');
 }
 
-async function fetchImages(
+async function fetchImages(tweets: TweetsType) {
+  console.log('Info: Start fetching Images', Object.keys(tweets).length);
+
+  for (const key of Object.keys(tweets)) {
+    const tweet = tweets[key];
+    if (tweet.medias.length > 0) {
+      const mediaUrl = tweet.medias[0].url; // Only first image so there are no duplicate hands
+      if (mediaUrl != null) {
+        const name = mediaUrl
+          .substring(mediaUrl.lastIndexOf('/'))
+          .replace('/', '');
+        await downloadImageFromUrl(mediaUrl, name, config.app.outImagesPath);
+      }
+    }
+  }
+
+  console.log('Info: End fetching Images');
+}
+
+async function fetchTweets(
   client: TwitterApi,
   options: FetchImagesOptionsType = {},
 ) {
-  console.log('Info: Start fetching Images', options);
+  console.log('Info: Start fetching Tweets', options);
 
+  // Already fetched tweets
   const tweets: TweetsType = {};
-  const processedTweets: string[] = [];
+  // Newly fetched tweets
+  const newTweets: TweetsType = {};
 
-  // Load already processed tweets
+  // Load already processed tweets from the local disk
   if (config.app.storeTweets) {
     try {
-      const rawData = fs.readFileSync(config.app.storeTweetsPath);
+      const rawData = await readFile(config.app.storeTweetsPath);
       const data: JsonTweetType = JSON.parse(rawData.toString());
       const parsedTweets = data.data;
       for (const key of Object.keys(parsedTweets)) {
         tweets[key] = parsedTweets[key];
-        processedTweets.push(key);
       }
     } catch (e) {
       console.log(
@@ -97,99 +125,101 @@ async function fetchImages(
     }
   }
 
-  // Fetch Tweet pages (via pagination based on next_token)
+  // Fetch all tweets based on the given query (via pagination based on next_token)
   // Query: https://developer.twitter.com/en/docs/twitter-api/tweets/counts/integrate/build-a-query
   // Pagination: https://developer.twitter.com/en/docs/twitter-api/tweets/search/integrate/paginate
   let response: TweetSearchRecentV2Paginator;
-  let nextToken: string | null = null;
-  let pageCount = 1;
+  let nextPageToken: string | null = null;
+  let currentPage = 1;
+  let fetchedTweetsCount = 0;
+  let maxResults = 100;
   do {
-    console.log(`Info: Fetch Tweet page`, { nextToken, pageCount });
-
-    // Fetch Tweet page
-    response = await client.v2.search(
-      //'#WeAreOkay has:media has:images -is:retweet',
-      `${hashtag} has:media has:images -is:retweet`,
-      {
-        // https://developer.twitter.com/en/docs/twitter-api/data-dictionary/object-model/media
-        'media.fields': [
-          'media_key',
-          'preview_image_url',
-          'type',
-          'url',
-          'width',
-          'height',
-        ],
-        'tweet.fields': ['created_at', 'author_id'],
-        expansions: [
-          'entities.mentions.username',
-          'attachments.media_keys', // Required to fetch media
-        ],
-        start_time: options.startTime,
-        end_time: options.endTime,
-        max_results: 100, // Between 10 and 100
-        next_token: nextToken || undefined,
-      },
-    );
-
-    // Write raw Data Object for debugging and exploring the Twitter api response
-    fs.writeFileSync(
-      `${config.app.outDataPath}/rawData.json`,
-      JSON.stringify(response, null, 2),
-      'utf-8',
-    );
-
-    // Format Tweets and add them to the 'tweets' array
-    const rawTweets = response.tweets;
-    const includes = new TwitterV2IncludesHelper(response);
-    for (const tweet of rawTweets) {
-      tweets[tweet.id] = {
-        ...tweet,
-        medias: includes.medias(tweet),
-      };
+    // Calculate amount of to fetch tweets (maxResults), if a limit was specified
+    if (config.app.fetchLimit != null) {
+      const left = config.app.fetchLimit - fetchedTweetsCount;
+      maxResults = left > 100 ? 100 : left;
     }
 
-    nextToken = response.meta.next_token ?? null;
-    pageCount++;
-  } while (nextToken != null);
+    console.log(`Info: Fetch Tweet page`, {
+      nextToken: nextPageToken,
+      pageCount: currentPage,
+      maxResults,
+    });
 
-  // Save all processed tweets (including the new ones)
-  fs.writeFileSync(
+    // Fetch next tweet page, if more tweets need to be fetched
+    if (maxResults > 0) {
+      response = await client.v2.search(
+        //'#WeAreOkay has:media has:images -is:retweet',
+        `${config.app.hashtag} has:media has:images -is:retweet`,
+        {
+          // https://developer.twitter.com/en/docs/twitter-api/data-dictionary/object-model/media
+          'media.fields': [
+            'media_key',
+            'preview_image_url',
+            'type',
+            'url',
+            'width',
+            'height',
+          ],
+          'tweet.fields': ['created_at', 'author_id'],
+          expansions: [
+            'entities.mentions.username',
+            'attachments.media_keys', // Required to fetch media
+          ],
+          start_time: options.startTime,
+          end_time: options.endTime,
+          max_results: maxResults, // Has to be between 10 and 100
+          next_token: nextPageToken || undefined,
+        },
+      );
+
+      // Write raw Data Object for debugging and exploring the Twitter api response
+      // await writeFile(
+      //   `${config.app.outDataPath}/rawData.json`,
+      //   JSON.stringify(response, null, 2),
+      // );
+
+      // Format Tweets and append them to the 'tweets' array
+      const rawTweets = response.tweets;
+      const includes = new TwitterV2IncludesHelper(response);
+      for (const rawTweet of rawTweets) {
+        const tweet = {
+          ...rawTweet,
+          medias: includes.medias(rawTweet),
+        };
+        tweets[tweet.id] = tweet;
+        newTweets[tweet.id] = tweet;
+        fetchedTweetsCount++;
+      }
+
+      nextPageToken = response.meta.next_token ?? null;
+      currentPage++;
+    }
+  } while (nextPageToken != null && maxResults > 0 && maxResults <= 100);
+
+  // Save all processed tweets (including the new ones) to the local disk
+  await writeFile(
     `${config.app.outDataPath}/tweets.json`,
     JSON.stringify(
       { count: Object.keys(tweets).length, data: tweets } as JsonTweetType,
       null,
       2,
     ),
-    'utf-8',
   );
 
-  // Fetch images from tweet and save it to local disk
-  for (const key of Object.keys(tweets)) {
-    const tweet = tweets[key];
-    if (!processedTweets.includes(key)) {
-      for (const media of tweet.medias) {
-        const mediaUrl = media.url;
-        if (mediaUrl != null) {
-          const name = mediaUrl
-            .substring(mediaUrl.lastIndexOf('/'))
-            .replace('/', '');
-          await downloadImageFromUrl(mediaUrl, name, config.app.outImagesPath);
-        }
-      }
-    }
-  }
+  // Fetch images from newly added tweets and them to the local disk
+  await fetchImages(newTweets);
 
-  console.log('Info: End fetching Images');
+  console.log('Info: End fetching Tweets', { fetchedTweetsCount });
 }
 
 async function main() {
   const client = new TwitterApi(config.twitter.bearerToken || 'unknown');
-  const startTime = new Date('02 April 2022').toISOString();
-  const endTime = new Date('07 April 2022').toISOString();
+  const startTime = new Date('08 April 2022').toISOString();
+  const endTime = new Date('09 April 2022').toISOString();
 
-  if (fetch)
-    await fetchImages(client, {
+  if (config.app.fetchTweets)
+    await fetchTweets(client, {
       startTime: startTime,
       endTime: endTime,
     });

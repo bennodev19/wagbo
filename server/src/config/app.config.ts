@@ -1,10 +1,11 @@
-const outPath = `${__dirname}/../../out`;
+const outDirPath = `${__dirname}/../../out`;
 
 export default {
-  outPath,
-  outDataPath: `${outPath}/data`,
-  outImagesPath: `${outPath}/images`,
-  storeTweetsPath: `${outPath}/data/tweets.json`,
+  outPath: outDirPath,
+  outChunksDirPath: `${outDirPath}/chunks`,
+  outDataDirPath: `${outDirPath}/data`,
+  outImagesDirPath: `${outDirPath}/images`,
+  storeTweetsFilePath: `${outDirPath}/data/tweets.json`,
 
   // Whether to store the fetched tweets locally (storeTweetsPath)
   storeTweets: true,
@@ -25,5 +26,7 @@ export default {
   // Background color of the generated image
   bgColor: '#FFF9EF', // '#19AB6D'
   // Name of the generated image
-  imageName: 'demo04-09-2022.jpeg',
+  imageName: 'demo04-09-2022',
+  // Whether to split big image into multiple chunks
+  chunks: 8,
 };

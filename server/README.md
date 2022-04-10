@@ -26,10 +26,12 @@ and merges them into one big image. (like the below)
    ├── out
    │   └── data
    │   └── images
+   │   └── chunks
    .
    ```
    - `data` contains all the already fetched tweets in `json` format
-   - `images` contains all the already fetched images. These will be used to generate the final big image.
+   - `images` contains all already retrieved images. These will be used to generate the final big image.
+   - `chunks` contains all generated image chunks.
 
 ## 👨‍🎓 Learnings
 

@@ -17,17 +17,20 @@ import {
 import sharp from 'sharp';
 
 async function mergeImagesFromHardDrive() {
-  console.time('Info: Start loading Images from the hard drive');
+  console.log('Info: Start loading Images from the hard drive');
 
   // Fetch raw images from local folder
   let rawImages: { [p: string]: Uint8Array } = {};
   try {
-    rawImages = await readFilesFromDir(config.app.outImagesPath);
+    rawImages = await readFilesFromDir(config.app.outImagesDirPath);
   } catch (e) {
     console.error("Info: Couldn't find images on hard drive!");
   }
   const imageBuffers: Buffer[] = [];
   for (const key in rawImages) imageBuffers.push(Buffer.from(rawImages[key]));
+
+  console.log('Info: End loading Images from the hard drive');
+  console.log('Info: Start resizing Images');
 
   // Resize images to arrange it better in the canvas later
   const resizedImageBuffers: Buffer[] = [];
@@ -50,36 +53,70 @@ async function mergeImagesFromHardDrive() {
     images.push({ image });
   }
 
-  console.log('Info: End loading Images from the hard drive');
+  console.log('Info: End resizing Images');
 
-  if (images.length > 0) {
-    // Strip excessive some images to make the final image a even square
-    const colCount = Math.floor(Math.sqrt(images.length));
-    const maxImagesCount = colCount * colCount;
-
-    console.log('Info: Start merging Images', {
-      imagesCount: images.length,
-      colCount,
-      maxImagesCount,
+  // Split images into chunks
+  const chunks: { image: Image }[][] = [];
+  if (typeof config.app.chunks === 'number' && config.app.chunks > 0) {
+    const chunksCount = config.app.chunks;
+    const chunkSize = Math.floor(images.length / chunksCount);
+    for (let i = 0; i < images.length; i += chunkSize) {
+      const chunkImages = images.slice(i, i + chunkSize);
+      // Add only complete chunks as the last one will only contain the remaining images
+      if (chunkImages.length === chunkSize) chunks.push(chunkImages);
+    }
+    console.log('Info: Chunks Data', {
+      chunksCount,
+      chunkSize,
+      chunks: chunks.map((i) => i.length),
     });
-
-    // Merge images to square canvas grid
-    const merge = new CanvasGrid({
-      canvas: new Canvas(2, 2),
-      bgColor: config.app.bgColor,
-      col: colCount,
-      list: images.slice(0, maxImagesCount),
-    });
-    const buffer = merge.canvas.toBuffer();
-
-    // Save generated image to the hard drive
-    await writeFile(`${config.app.outPath}/${config.app.imageName}`, buffer);
+  } else {
+    chunks.push(images);
   }
 
-  console.time('Info: End merging Images');
+  // Strip excessive some images to make the final image chunk an even square
+  const chunkColCount = Math.floor(Math.sqrt(chunks[0].length));
+  const chunkImagesCount = chunkColCount * chunkColCount;
+
+  console.log(`Info: Start merging Images`, {
+    importedImagesCount: images.length,
+    colCount: chunkColCount,
+    imagesCount: chunkImagesCount * chunks.length,
+  });
+
+  for (let i = 0; i < chunks.length; i++) {
+    const chunk = chunks[i];
+    if (chunk.length > 0) {
+      console.log(`Info: Start creating Chunk ${i + 1}`, {
+        chunkColCount,
+        chunkImagesCount,
+      });
+
+      // Merge images to square canvas grid
+      const merge = new CanvasGrid({
+        canvas: new Canvas(2, 2),
+        bgColor: config.app.bgColor,
+        col: chunkColCount,
+        list: chunk.slice(0, chunkImagesCount),
+      });
+      const buffer = merge.canvas.toBuffer();
+
+      // Save generated image to the hard drive
+      await writeFile(
+        `${config.app.outChunksDirPath}/${config.app.imageName}${
+          chunks.length > 1 ? `-${i + 1}` : ''
+        }.jpeg`,
+        buffer,
+      );
+
+      console.log(`Info: End creating Chunk ${i + 1}`);
+    }
+  }
+
+  console.log('Info: End merging Images');
 }
 
-async function fetchImage(tweets: TweetsType) {
+async function fetchImages(tweets: TweetsType) {
   console.log('Info: Start fetching Images', Object.keys(tweets).length);
 
   for (const key of Object.keys(tweets)) {
@@ -90,7 +127,7 @@ async function fetchImage(tweets: TweetsType) {
         const name = mediaUrl
           .substring(mediaUrl.lastIndexOf('/'))
           .replace('/', '');
-        await downloadImageFromUrl(mediaUrl, name, config.app.outImagesPath);
+        await downloadImageFromUrl(mediaUrl, name, config.app.outImagesDirPath);
       }
     }
   }
@@ -112,7 +149,7 @@ async function fetchTweets(
   // Load already retrieved tweets from the local hard drive
   if (config.app.storeTweets) {
     try {
-      const rawData = await readFile(config.app.storeTweetsPath);
+      const rawData = await readFile(config.app.storeTweetsFilePath);
       const data: JsonTweetType = JSON.parse(rawData.toString());
       const parsedTweets = data.data;
       for (const key of Object.keys(parsedTweets)) {
@@ -121,7 +158,7 @@ async function fetchTweets(
     } catch (e) {
       console.log(
         `Warning: Couldn't find the json file where the tweets are stored in!`,
-        config.app.storeTweetsPath,
+        config.app.storeTweetsFilePath,
       );
     }
   }
@@ -204,7 +241,7 @@ async function fetchTweets(
   if (config.app.storeTweets) {
     const finalTweets = { ...tweets, ...newTweets };
     await writeFile(
-      `${config.app.outDataPath}/tweets.json`,
+      `${config.app.outDataDirPath}/tweets.json`,
       JSON.stringify(
         {
           count: Object.keys(finalTweets).length,
@@ -217,7 +254,7 @@ async function fetchTweets(
   }
 
   // Fetch images of newly added tweets and save them to the local hard drive
-  await fetchImage(newTweets);
+  await fetchImages(newTweets);
 
   console.log('Info: End fetching Tweets', { fetchedTweetsCount });
 }

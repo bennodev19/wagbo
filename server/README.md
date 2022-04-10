@@ -1,8 +1,8 @@
 # 🐻WAGBO Server
 > We Are Gonna Be Okay 👌🐻
 
-Retrieves images from tweets with the hashtag `#WeAreOkay`.
-and merges them into one big image.
+Retrieves images from tweets with the hashtag `#WeAreOkay`
+and merges them into one big image. (like the below)
 
 <img src="https://raw.githubusercontent.com/bennodev19/wagbo/master/static/wagbo.png" alt="Wagbo Example">
 

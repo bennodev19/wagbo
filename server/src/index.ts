@@ -16,15 +16,15 @@ import {
 } from './file';
 import sharp from 'sharp';
 
-async function mergeImages() {
-  console.time('Info: Start fetching Images');
+async function mergeImagesFromHardDrive() {
+  console.time('Info: Start loading Images from the hard drive');
 
   // Fetch raw images from local folder
   let rawImages: { [p: string]: Uint8Array } = {};
   try {
     rawImages = await readFilesFromDir(config.app.outImagesPath);
   } catch (e) {
-    console.log("Info: Couldn't find any image!");
+    console.error("Info: Couldn't find images on hard drive!");
   }
   const imageBuffers: Buffer[] = [];
   for (const key in rawImages) imageBuffers.push(Buffer.from(rawImages[key]));
@@ -50,19 +50,20 @@ async function mergeImages() {
     images.push({ image });
   }
 
-  console.log('Info: End fetching Images');
+  console.log('Info: End loading Images from the hard drive');
 
   if (images.length > 0) {
-    // Strip some images to make final image a even square
+    // Strip excessive some images to make the final image a even square
     const colCount = Math.floor(Math.sqrt(images.length));
     const maxImagesCount = colCount * colCount;
+
     console.log('Info: Start merging Images', {
       imagesCount: images.length,
       colCount,
       maxImagesCount,
     });
 
-    // Merge images to canvas grid
+    // Merge images to square canvas grid
     const merge = new CanvasGrid({
       canvas: new Canvas(2, 2),
       bgColor: config.app.bgColor,
@@ -71,14 +72,14 @@ async function mergeImages() {
     });
     const buffer = merge.canvas.toBuffer();
 
-    // Write merged image to local disk
+    // Save generated image to the hard drive
     await writeFile(`${config.app.outPath}/${config.app.imageName}`, buffer);
   }
 
   console.time('Info: End merging Images');
 }
 
-async function fetchImages(tweets: TweetsType) {
+async function fetchImage(tweets: TweetsType) {
   console.log('Info: Start fetching Images', Object.keys(tweets).length);
 
   for (const key of Object.keys(tweets)) {
@@ -103,12 +104,12 @@ async function fetchTweets(
 ) {
   console.log('Info: Start fetching Tweets', options);
 
-  // Already fetched tweets
+  // Already retrieved tweets
   const tweets: TweetsType = {};
-  // Newly fetched tweets
+  // Newly retrieved tweets
   const newTweets: TweetsType = {};
 
-  // Load already processed tweets from the local disk
+  // Load already retrieved tweets from the local hard drive
   if (config.app.storeTweets) {
     try {
       const rawData = await readFile(config.app.storeTweetsPath);
@@ -134,7 +135,7 @@ async function fetchTweets(
   let fetchedTweetsCount = 0;
   let maxResults = 100;
   do {
-    // Calculate amount of to fetch tweets (maxResults), if a limit was specified
+    // Calculation of the number of tweets to retrieve (maxResults) if a limit has been specified
     if (config.app.fetchLimit != null) {
       const left = config.app.fetchLimit - fetchedTweetsCount;
       maxResults = left > 100 ? 100 : left;
@@ -146,7 +147,7 @@ async function fetchTweets(
       maxResults,
     });
 
-    // Fetch next tweet page, if more tweets need to be fetched
+    // Fetch next tweet page if more tweets need to be retrieved
     if (maxResults > 0) {
       response = await client.v2.search(
         //'#WeAreOkay has:media has:images -is:retweet',
@@ -179,7 +180,8 @@ async function fetchTweets(
       //   JSON.stringify(response, null, 2),
       // );
 
-      // Format Tweets and append them to the 'tweets' array
+      // Format Tweets and append them to the 'newTweets' array
+      // if they weren't already retrieved in the past
       const rawTweets = response.tweets;
       const includes = new TwitterV2IncludesHelper(response);
       for (const rawTweet of rawTweets) {
@@ -187,9 +189,10 @@ async function fetchTweets(
           ...rawTweet,
           medias: includes.medias(rawTweet),
         };
-        tweets[tweet.id] = tweet;
-        newTweets[tweet.id] = tweet;
-        fetchedTweetsCount++;
+        if (tweets[tweet.id] == null) {
+          newTweets[tweet.id] = tweet;
+          fetchedTweetsCount++;
+        }
       }
 
       nextPageToken = response.meta.next_token ?? null;
@@ -197,18 +200,24 @@ async function fetchTweets(
     }
   } while (nextPageToken != null && maxResults > 0 && maxResults <= 100);
 
-  // Save all processed tweets (including the new ones) to the local disk
-  await writeFile(
-    `${config.app.outDataPath}/tweets.json`,
-    JSON.stringify(
-      { count: Object.keys(tweets).length, data: tweets } as JsonTweetType,
-      null,
-      2,
-    ),
-  );
+  // Save newly retrieved tweets (with the in the past retrieved tweets) to the local hard drive
+  if (config.app.storeTweets) {
+    const finalTweets = { ...tweets, ...newTweets };
+    await writeFile(
+      `${config.app.outDataPath}/tweets.json`,
+      JSON.stringify(
+        {
+          count: Object.keys(finalTweets).length,
+          data: finalTweets,
+        } as JsonTweetType,
+        null,
+        2,
+      ),
+    );
+  }
 
-  // Fetch images from newly added tweets and them to the local disk
-  await fetchImages(newTweets);
+  // Fetch images of newly added tweets and save them to the local hard drive
+  await fetchImage(newTweets);
 
   console.log('Info: End fetching Tweets', { fetchedTweetsCount });
 }
@@ -223,7 +232,7 @@ async function main() {
       startTime: startTime,
       endTime: endTime,
     });
-  await mergeImages();
+  await mergeImagesFromHardDrive();
 }
 
 main();

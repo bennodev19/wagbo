@@ -224,13 +224,19 @@ async function fetchTweets(
 
 async function main() {
   const client = new TwitterApi(config.twitter.bearerToken || 'unknown');
-  const startTime = new Date('08 April 2022').toISOString();
-  const endTime = new Date('09 April 2022').toISOString();
+  const startTime =
+    config.app.startTime != null
+      ? new Date(config.app.startTime).toISOString()
+      : undefined;
+  const endTime =
+    config.app.endTime != null
+      ? new Date(config.app.endTime).toISOString()
+      : undefined;
 
   if (config.app.fetchTweets)
     await fetchTweets(client, {
-      startTime: startTime,
-      endTime: endTime,
+      startTime,
+      endTime,
     });
   await mergeImagesFromHardDrive();
 }

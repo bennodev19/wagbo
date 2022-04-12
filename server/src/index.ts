@@ -13,6 +13,7 @@ import {
   downloadImageFromUrl,
   writeFile,
   readFile,
+  ReadFilesFromDirResponseType,
 } from './file';
 import sharp from 'sharp';
 
@@ -20,30 +21,50 @@ async function mergeImagesFromHardDrive() {
   console.log('Info: Start loading Images from the hard drive');
 
   // Fetch raw images from local folder
-  let rawImages: { [p: string]: Uint8Array } = {};
+  let loadedImages: ReadFilesFromDirResponseType = {};
   try {
-    rawImages = await readFilesFromDir(config.app.outImagesDirPath);
+    loadedImages = await readFilesFromDir(
+      config.app.outImagesDirPath,
+      config.app.filterDuplicateImages, // Hash is only required to filter duplicate images
+    );
   } catch (e) {
     console.error("Info: Couldn't find images on hard drive!");
   }
-  const imageBuffers: Buffer[] = [];
-  for (const key in rawImages) imageBuffers.push(Buffer.from(rawImages[key]));
 
   console.log('Info: End loading Images from the hard drive');
   console.log('Info: Start resizing Images');
 
-  // Resize images to arrange it better in the canvas later
+  // Resized images (Resized to arrange them better in the canvas later)
   const resizedImageBuffers: Buffer[] = [];
-  for (const imageBuffer of imageBuffers) {
-    const resizedImage = await sharp(imageBuffer)
-      .resize({
-        fit: sharp.fit.cover,
-        width: 400,
-        height: 400,
-      })
-      .jpeg({ quality: 80 })
-      .toBuffer();
-    resizedImageBuffers.push(resizedImage);
+  // Key-value pair with the image hash and name(s) (for filtering duplicate images)
+  const loadedImageNames: { [key: string]: string[] } = {};
+
+  // Filter duplicate images and resize non duplicate images
+  for (const key of Object.keys(loadedImages)) {
+    const loadedImage = loadedImages[key];
+    const loadedImageHash = loadedImage.hash;
+    if (loadedImageHash == null || loadedImageNames[loadedImageHash] == null) {
+      // Resize Image
+      const resizedImage = await sharp(loadedImage.buffer)
+        .resize({
+          fit: sharp.fit.cover,
+          width: 400,
+          height: 400,
+        })
+        .jpeg({ quality: 80 })
+        .toBuffer();
+      resizedImageBuffers.push(resizedImage);
+      // Add image name at image hash to 'loadedImageNames' to check later if the same image exists again
+      if (loadedImageHash != null) {
+        loadedImageNames[loadedImageHash] = [loadedImage.name];
+      }
+    } else {
+      loadedImageNames[loadedImageHash].push(loadedImage.name);
+      console.log(
+        `Info: Filtered duplicate image "${loadedImage.name}".`,
+        loadedImageNames[loadedImageHash],
+      );
+    }
   }
 
   // Transform image buffers to Canvas-Images

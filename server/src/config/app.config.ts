@@ -11,7 +11,7 @@ export default {
   storeTweets: true,
   // Whether to re/fetch the matching tweets and images from Twitter
   // or just generate the image based on the already fetched images (outImagePath)
-  fetchTweets: true,
+  fetchTweets: false,
   // Hashtag to retrieve the tweets from
   hashtag: '#WeAreOkay',
   // Max to fetch tweets (if set to 'undefined' it will fetch all found tweets)
@@ -21,12 +21,14 @@ export default {
   startTime: '08 April 2022',
   // The newest, most recent UTC timestamp to which the Tweets will be provided.
   // By default, a request will return Tweets until today if you set it to 'undefined'.
-  endTime: '10 April 2022',
+  endTime: '12 April 2022',
 
   // Background color of the generated image
   bgColor: '#FFF9EF', // '#19AB6D'
   // Name of the generated image
-  imageName: 'demo04-09-2022',
+  imageName: 'demo04-12-2022',
   // Whether to split big image into multiple chunks
-  chunks: 8,
+  chunks: 16,
+  // Weather to filter duplicate images
+  filterDuplicateImages: true,
 };

@@ -1,7 +1,8 @@
 import fs from 'fs';
 import axios from 'axios';
+import { hashImageBuffer } from './utlis';
 
-export const readFile = async (filepath: string): Promise<Uint8Array> => {
+export const readFile = async (filepath: string): Promise<Buffer> => {
   console.log('Info: Start Reading File', filepath);
   return await new Promise((resolve, reject) => {
     fs.readFile(filepath, (err, content) => {
@@ -31,21 +32,33 @@ export const readDir = async (dirpath: string): Promise<string[]> => {
 
 export const readFilesFromDir = async (
   dirpath: string,
-): Promise<{ [key: string]: Uint8Array }> => {
-  const filesObject = {};
+  createHash = true,
+): Promise<ReadFilesFromDirResponseType> => {
+  const filesObject: ReadFilesFromDirResponseType = {};
   const filesInDir = await readDir(dirpath);
 
   for (const key in filesInDir) {
     const filename = filesInDir[key];
-    filesObject[filename] = await readFile(`${dirpath}/${filename}`);
+    const buffer = await readFile(`${dirpath}/${filename}`);
+    const hash = createHash ? await hashImageBuffer(buffer, filename) : null;
+    filesObject[filename] = { buffer, hash, name: filename };
   }
 
   return filesObject;
 };
 
+export type LoadedImageType = {
+  buffer: Buffer;
+  hash: string | null;
+  name: string;
+};
+export type ReadFilesFromDirResponseType = {
+  [key: string]: LoadedImageType;
+};
+
 export const writeFile = async (
   filepath: string,
-  data: Uint8Array | string,
+  data: Buffer | string,
 ): Promise<void> => {
   console.log('Info: Start Writing File', filepath);
 

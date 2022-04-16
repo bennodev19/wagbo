@@ -462,7 +462,7 @@ async function main() {
 
   // Map to Images
   const toMapImages = await loadImagesFromHardDrive(
-    config.app.outImagesDirPath,
+    config.app.outMapImagesDirPath,
   );
   for (const key of Object.keys(toMapImages)) {
     const image = toMapImages[key];

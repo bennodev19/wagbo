@@ -18,12 +18,13 @@ import {
 } from './file';
 import sharp from 'sharp';
 import sizeOf from 'buffer-image-size';
+import { rgb2lab, deltaE } from 'rgb-lab';
 
-async function getImageBrightness(
+async function getImageOverAllColor(
   image: Buffer,
   imageWidth: number,
   imageHeight: number,
-): Promise<number> {
+): Promise<OverAllColorType> {
   const canvas = new Canvas(imageWidth, imageHeight);
   const ctx = canvas.getContext('2d');
   const canvasImage = await loadImage(image);
@@ -33,16 +34,39 @@ async function getImageBrightness(
 
   // Detect brightness of image
   let colorSum = 0;
+  const rgb: RGBType = { r: 0, g: 0, b: 0 };
+  let count = 0;
   for (let i = 0; i < data.length; i += 4) {
     const r = data[i];
     const g = data[i + 1];
     const b = data[i + 2];
     const avg = Math.floor((r + g + b) / 3);
+
+    rgb.r += r;
+    rgb.g += g;
+    rgb.b += b;
     colorSum += avg;
+
+    count++;
   }
 
-  return Math.floor(colorSum / (imageWidth * imageHeight));
+  // ~~ used to floor values
+  rgb.r = ~~(rgb.r / count);
+  rgb.g = ~~(rgb.g / count);
+  rgb.b = ~~(rgb.b / count);
+
+  return {
+    brightness: Math.floor(colorSum / (imageWidth * imageHeight)),
+    overAllRgb: rgb,
+  };
 }
+
+type OverAllColorType = {
+  brightness: number;
+  overAllRgb: RGBType;
+};
+
+type RGBType = { r: number; g: number; b: number };
 
 async function resizeImage(
   image: Buffer,
@@ -103,12 +127,12 @@ async function formatImages(
       const canvasImage = await loadImage(resizedImage);
 
       // Detect image brightness
-      const brightness = await getImageBrightness(resizedImage, size, size);
+      const overAllColor = await getImageOverAllColor(resizedImage, size, size);
 
       formattedImages.push({
         hash: loadedImageHash,
         name: loadedImage.name,
-        brightness,
+        overAllColor,
         buffer: resizedImage,
         canvas: canvasImage,
       });
@@ -132,21 +156,16 @@ async function formatImages(
 }
 
 type FormattedImageType = {
-  brightness: number;
+  overAllColor: OverAllColorType;
   canvas: Image;
 } & LoadedImageType;
 
 async function mergeImagesFromHardDriveToEvenChunks() {
   const loadedImages = await loadImagesFromHardDrive();
   const formattedImages = await formatImages(loadedImages);
-  const sortedImages = formattedImages.sort((a, b) => {
-    if (a.brightness < b.brightness) return -1;
-    if (a.brightness > b.brightness) return 1;
-    return 0;
-  });
 
   // Transform image buffers to Canvas-Images
-  const canvasImages: { image: Image }[] = sortedImages.map((i) => ({
+  const canvasImages: { image: Image }[] = formattedImages.map((i) => ({
     image: i.canvas,
   }));
 
@@ -213,7 +232,7 @@ async function mergeImagesFromHardDriveToEvenChunks() {
 }
 
 async function mapToImage() {
-  const name = 'soby2';
+  const name = 'devid2';
 
   // Load image parts
   // Note: pa = image part
@@ -255,11 +274,28 @@ async function mapToImage() {
       const b = inImageData.data[n + 2];
       const avg = Math.floor((r + g + b) / 3);
 
-      // Get closest grayscale hand image
+      // Find closest image by brightness
+      // const closest = paImages.reduce(function (prev, curr) {
+      //   return Math.abs(curr.brightness - avg) < Math.abs(prev.brightness - avg)
+      //     ? curr
+      //     : prev;
+      // });
+
+      // Find closest image by color
+      // https://stackoverflow.com/questions/13586999/color-difference-similarity-between-two-values-with-js
       const closest = paImages.reduce(function (prev, curr) {
-        return Math.abs(curr.brightness - avg) < Math.abs(prev.brightness - avg)
-          ? curr
-          : prev;
+        const lab = rgb2lab([r, g, b]);
+        const prevLab = rgb2lab([
+          prev.overAllColor.overAllRgb.r,
+          prev.overAllColor.overAllRgb.g,
+          prev.overAllColor.overAllRgb.b,
+        ]);
+        const currLab = rgb2lab([
+          curr.overAllColor.overAllRgb.r,
+          curr.overAllColor.overAllRgb.g,
+          curr.overAllColor.overAllRgb.b,
+        ]);
+        return deltaE(lab, currLab) < deltaE(lab, prevLab) ? curr : prev;
       });
 
       // Draw Image in canvas

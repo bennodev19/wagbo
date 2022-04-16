@@ -5,6 +5,7 @@ export default {
   outChunksDirPath: `${outDirPath}/chunks`,
   outDataDirPath: `${outDirPath}/data`,
   outImagesDirPath: `${outDirPath}/images`,
+  outMapImagesDirPath: `${outDirPath}/map`,
   storeTweetsFilePath: `${outDirPath}/data/tweets.json`,
 
   // Whether to store the fetched tweets locally (storeTweetsPath)

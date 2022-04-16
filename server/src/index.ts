@@ -5,16 +5,16 @@ import {
   TwitterApi,
   TwitterV2IncludesHelper,
 } from 'twitter-api-v2';
+import CanvasGrid from 'merge-images-grid/cjs';
 import config from './config';
 import { Canvas, Image, loadImage } from 'canvas';
-import CanvasGrid from 'merge-images-grid';
 import {
-  readFilesFromDir,
   downloadImageFromUrl,
-  writeFile,
-  readFile,
-  ReadFilesFromDirResponseType,
   LoadedImageType,
+  readFile,
+  readFilesFromDir,
+  ReadFilesFromDirResponseType,
+  writeFile,
 } from './file';
 import sharp from 'sharp';
 import sizeOf from 'buffer-image-size';
@@ -61,13 +61,6 @@ async function getImageOverAllColor(
   };
 }
 
-type OverAllColorType = {
-  brightness: number;
-  overAllRgb: RGBType;
-};
-
-type RGBType = { r: number; g: number; b: number };
-
 async function resizeImage(
   image: Buffer,
   imageWidth: number,
@@ -83,14 +76,16 @@ async function resizeImage(
     .toBuffer();
 }
 
-async function loadImagesFromHardDrive(): Promise<ReadFilesFromDirResponseType> {
+async function loadImagesFromHardDrive(
+  dirPath: string,
+): Promise<ReadFilesFromDirResponseType> {
   console.log('Info: Start loading Images from the hard drive');
 
   // Fetch raw images from local folder
   let loadedImages: ReadFilesFromDirResponseType = {};
   try {
     loadedImages = await readFilesFromDir(
-      config.app.outImagesDirPath,
+      dirPath,
       config.app.filterDuplicateImages, // Hash is only required to filter duplicate images
       config.app.maxImageCount || undefined,
     );
@@ -155,116 +150,105 @@ async function formatImages(
   return formattedImages;
 }
 
-type FormattedImageType = {
-  overAllColor: OverAllColorType;
-  canvas: Image;
-} & LoadedImageType;
+// async function mergeImagesFromHardDriveToEvenChunks() {
+//   const loadedImages = await loadImagesFromHardDrive(
+//     config.app.outImagesDirPath,
+//   );
+//   const formattedImages = await formatImages(loadedImages);
+//
+//   // Transform image buffers to Canvas-Images
+//   const canvasImages: { image: Image }[] = formattedImages.map((i) => ({
+//     image: i.canvas,
+//   }));
+//
+//   // Split images into chunks
+//   const chunks: { image: Image }[][] = [];
+//   if (typeof config.app.chunks === 'number' && config.app.chunks > 0) {
+//     const chunksCount = config.app.chunks;
+//     const chunkSize = Math.floor(canvasImages.length / chunksCount);
+//     for (let i = 0; i < canvasImages.length; i += chunkSize) {
+//       const chunkImages = canvasImages.slice(i, i + chunkSize);
+//       // Add only complete chunks as the last one will only contain the remaining images and won't be complete
+//       if (chunkImages.length === chunkSize) chunks.push(chunkImages);
+//     }
+//     console.log('Info: Chunks Data', {
+//       chunksCount,
+//       chunkSize,
+//       chunks: chunks.map((i) => i.length),
+//     });
+//   } else {
+//     chunks.push(canvasImages);
+//   }
+//
+//   // Strip excessive some images to make the final image chunk an even square
+//   const chunkColCount = Math.floor(Math.sqrt(chunks[0].length));
+//   const chunkImagesCount = chunkColCount * chunkColCount;
+//
+//   console.log(`Info: Start merging Images`, {
+//     importedImagesCount: canvasImages.length,
+//     colCount: chunkColCount,
+//     imagesCount: chunkImagesCount * chunks.length,
+//   });
+//
+//   // Merge images of chunks
+//   for (let i = 0; i < chunks.length; i++) {
+//     const chunk = chunks[i];
+//     if (chunk.length > 0) {
+//       console.log(`Info: Start creating Chunk ${i + 1}`, {
+//         chunkColCount,
+//         chunkImagesCount,
+//       });
+//
+//       // Merge images to square canvas grid
+//       const merge = new CanvasGrid({
+//         canvas: new Canvas(2, 2),
+//         bgColor: config.app.bgColor,
+//         col: chunkColCount,
+//         list: chunk.slice(0, chunkImagesCount),
+//       });
+//       const buffer = merge.canvas.toBuffer();
+//
+//       // Save generated image to the hard drive
+//       await writeFile(
+//         `${config.app.outChunksDirPath}/${config.app.imageName}${
+//           chunks.length > 1 ? `-${i + 1}` : ''
+//         }.jpeg`,
+//         buffer,
+//       );
+//
+//       console.log(`Info: End creating Chunk ${i + 1}`);
+//     }
+//   }
+//
+//   console.log('Info: End merging Images');
+// }
 
-async function mergeImagesFromHardDriveToEvenChunks() {
-  const loadedImages = await loadImagesFromHardDrive();
-  const formattedImages = await formatImages(loadedImages);
-
-  // Transform image buffers to Canvas-Images
-  const canvasImages: { image: Image }[] = formattedImages.map((i) => ({
-    image: i.canvas,
-  }));
-
-  // Split images into chunks
-  const chunks: { image: Image }[][] = [];
-  if (typeof config.app.chunks === 'number' && config.app.chunks > 0) {
-    const chunksCount = config.app.chunks;
-    const chunkSize = Math.floor(canvasImages.length / chunksCount);
-    for (let i = 0; i < canvasImages.length; i += chunkSize) {
-      const chunkImages = canvasImages.slice(i, i + chunkSize);
-      // Add only complete chunks as the last one will only contain the remaining images and won't be complete
-      if (chunkImages.length === chunkSize) chunks.push(chunkImages);
-    }
-    console.log('Info: Chunks Data', {
-      chunksCount,
-      chunkSize,
-      chunks: chunks.map((i) => i.length),
-    });
-  } else {
-    chunks.push(canvasImages);
-  }
-
-  // Strip excessive some images to make the final image chunk an even square
-  const chunkColCount = Math.floor(Math.sqrt(chunks[0].length));
-  const chunkImagesCount = chunkColCount * chunkColCount;
-
-  console.log(`Info: Start merging Images`, {
-    importedImagesCount: canvasImages.length,
-    colCount: chunkColCount,
-    imagesCount: chunkImagesCount * chunks.length,
-  });
-
-  // Merge images of chunks
-  for (let i = 0; i < chunks.length; i++) {
-    const chunk = chunks[i];
-    if (chunk.length > 0) {
-      console.log(`Info: Start creating Chunk ${i + 1}`, {
-        chunkColCount,
-        chunkImagesCount,
-      });
-
-      // Merge images to square canvas grid
-      const merge = new CanvasGrid({
-        canvas: new Canvas(2, 2),
-        bgColor: config.app.bgColor,
-        col: chunkColCount,
-        list: chunk.slice(0, chunkImagesCount),
-      });
-      const buffer = merge.canvas.toBuffer();
-
-      // Save generated image to the hard drive
-      await writeFile(
-        `${config.app.outChunksDirPath}/${config.app.imageName}${
-          chunks.length > 1 ? `-${i + 1}` : ''
-        }.jpeg`,
-        buffer,
-      );
-
-      console.log(`Info: End creating Chunk ${i + 1}`);
-    }
-  }
-
-  console.log('Info: End merging Images');
-}
-
-async function mapToImage() {
-  const name = 'devid2';
-
-  // Load image parts
-  // Note: pa = image part
+async function mapToImage(image: Buffer): Promise<Buffer> {
+  // Load image parts the final image consists off (pa = image part)
   const paImageSize = 100;
-  const loadedImages = await loadImagesFromHardDrive();
+  const loadedImages = await loadImagesFromHardDrive(
+    config.app.outImagesDirPath,
+  );
   const paImages = await formatImages(loadedImages, paImageSize);
 
-  // Load image to replace the pixels from
-  // in = input
-  const inImage = await readFile(`${config.app.outPath}/devid.jpg`);
-  const inFormatted = await sharp(inImage)
-    // .grayscale(true)
-    .resize({ width: 200, height: 200 })
-    .jpeg({ quality: 80 })
-    .toBuffer();
-  const inDimensions = sizeOf(inFormatted);
+  const inDimensions = sizeOf(image);
 
-  // Create input image canvas
+  // Create input image canvas (in = input)
   const inCanvas = new Canvas(inDimensions.width, inDimensions.height);
   const inCtx = inCanvas.getContext('2d');
-  const inImageCanvas = await loadImage(inFormatted);
+  const inImageCanvas = await loadImage(image);
   inCtx.drawImage(inImageCanvas, 0, 0);
   const inImageData = inCtx.getImageData(0, 0, inCanvas.width, inCanvas.height);
 
-  // Create final image canvas
+  // Create output image canvas
   const canvas = new Canvas(
     inDimensions.width * paImageSize,
     inDimensions.height * paImageSize,
   );
   const ctx = canvas.getContext('2d');
 
-  // Iterate through input image and replace the pixels with the most suitable hand
+  // Iterate through the input image pixels
+  // and replace them with the most suitible image in terms of color
   for (let y = 0; y < inImageData.height; y++) {
     for (let x = 0; x < inImageData.width; x++) {
       const n = y * (inImageData.width * 4) + x * 4;
@@ -281,7 +265,7 @@ async function mapToImage() {
       //     : prev;
       // });
 
-      // Find closest image by color
+      // Find closest image by overall color
       // https://stackoverflow.com/questions/13586999/color-difference-similarity-between-two-values-with-js
       const closest = paImages.reduce(function (prev, curr) {
         const lab = rgb2lab([r, g, b]);
@@ -298,16 +282,15 @@ async function mapToImage() {
         return deltaE(lab, currLab) < deltaE(lab, prevLab) ? curr : prev;
       });
 
-      // Draw Image in canvas
+      // Draw Image (pixel) to canvas
       ctx.drawImage(closest.canvas, x * paImageSize, y * paImageSize);
     }
   }
 
-  // Save generated image to the hard drive
-  await writeFile(`${config.app.outPath}/${name}_out.jpeg`, canvas.toBuffer());
+  return canvas.toBuffer();
 }
 
-async function fetchImages(tweets: TweetsType) {
+async function fetchImagesFromTweets(tweets: TweetsType) {
   console.log('Info: Start fetching Images', Object.keys(tweets).length);
 
   for (const key of Object.keys(tweets)) {
@@ -404,7 +387,7 @@ async function fetchTweets(
 
       // Write raw Data Object for debugging and exploring the Twitter api response
       // await writeFile(
-      //   `${config.app.outDataPath}/rawData.json`,
+      //   `${config.app.outDataDirPath}/rawData.json`,
       //   JSON.stringify(response, null, 2),
       // );
 
@@ -445,10 +428,22 @@ async function fetchTweets(
   }
 
   // Fetch images of newly added tweets and save them to the local hard drive
-  await fetchImages(newTweets);
+  await fetchImagesFromTweets(newTweets);
 
   console.log('Info: End fetching Tweets', { fetchedTweetsCount });
 }
+
+type TweetType = {
+  medias: MediaObjectV2[];
+} & TweetV2;
+
+type TweetsType = { [key: string]: TweetType };
+type JsonTweetType = { count: number; data: TweetsType };
+
+type FetchImagesOptionsType = {
+  startTime?: string;
+  endTime?: string;
+};
 
 async function main() {
   const client = new TwitterApi(config.twitter.bearerToken || 'unknown');
@@ -471,19 +466,37 @@ async function main() {
 
   // Merge images to chunks
   // await mergeImagesFromHardDriveToEvenChunks();
-  await mapToImage();
+
+  // Map to Images
+  const toMapImages = await loadImagesFromHardDrive(
+    config.app.outImagesDirPath,
+  );
+  for (const key of Object.keys(toMapImages)) {
+    const image = toMapImages[key];
+    const formattedImage = await sharp(image.buffer)
+      // .grayscale(true)
+      .resize({ width: 200, height: 200 })
+      .jpeg({ quality: 80 })
+      .toBuffer();
+
+    const mappedImage = await mapToImage(formattedImage);
+    await writeFile(
+      `${config.app.outMapImagesDirPath}/${image.name}_out.jpeg`,
+      mappedImage,
+    );
+  }
 }
 
 main();
 
-type TweetType = {
-  medias: MediaObjectV2[];
-} & TweetV2;
-
-type TweetsType = { [key: string]: TweetType };
-type JsonTweetType = { count: number; data: TweetsType };
-
-type FetchImagesOptionsType = {
-  startTime?: string;
-  endTime?: string;
+type OverAllColorType = {
+  brightness: number;
+  overAllRgb: RGBType;
 };
+
+type RGBType = { r: number; g: number; b: number };
+
+type FormattedImageType = {
+  overAllColor: OverAllColorType;
+  canvas: Image;
+} & LoadedImageType;

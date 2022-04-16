@@ -54,15 +54,6 @@ export const readFilesFromDir = async (
   return filesObject;
 };
 
-export type LoadedImageType = {
-  buffer: Buffer;
-  hash: string | null;
-  name: string;
-};
-export type ReadFilesFromDirResponseType = {
-  [key: string]: LoadedImageType;
-};
-
 export const writeFile = async (
   filepath: string,
   data: Buffer | string,
@@ -133,3 +124,12 @@ export async function downloadImageFromUrl(
       .on('error', (e) => reject(e));
   });
 }
+
+export type LoadedImageType = {
+  buffer: Buffer;
+  hash: string | null;
+  name: string;
+};
+export type ReadFilesFromDirResponseType = {
+  [key: string]: LoadedImageType;
+};

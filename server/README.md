@@ -6,6 +6,8 @@ and merges them into one big image. (like the below)
 
 <img src="https://raw.githubusercontent.com/bennodev19/wagbo/master/static/wagbo.png" alt="Wagbo Example">
 
+Note: This project has no clean code base.
+
 ## 😇 Setup
 
 1. Create [Twitter Developer Account](https://developer.twitter.com/en)

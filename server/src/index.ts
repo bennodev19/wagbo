@@ -14,10 +14,52 @@ import {
   writeFile,
   readFile,
   ReadFilesFromDirResponseType,
+  LoadedImageType,
 } from './file';
 import sharp from 'sharp';
+import sizeOf from 'buffer-image-size';
 
-async function mergeImagesFromHardDrive() {
+async function getImageBrightness(
+  image: Buffer,
+  imageWidth: number,
+  imageHeight: number,
+): Promise<number> {
+  const canvas = new Canvas(imageWidth, imageHeight);
+  const ctx = canvas.getContext('2d');
+  const canvasImage = await loadImage(image);
+  ctx.drawImage(canvasImage, 0, 0);
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const data = imageData.data;
+
+  // Detect brightness of image
+  let colorSum = 0;
+  for (let i = 0; i < data.length; i += 4) {
+    const r = data[i];
+    const g = data[i + 1];
+    const b = data[i + 2];
+    const avg = Math.floor((r + g + b) / 3);
+    colorSum += avg;
+  }
+
+  return Math.floor(colorSum / (imageWidth * imageHeight));
+}
+
+async function resizeImage(
+  image: Buffer,
+  imageWidth: number,
+  imageHeight: number,
+): Promise<Buffer> {
+  return await sharp(image)
+    .resize({
+      fit: sharp.fit.cover,
+      width: imageWidth,
+      height: imageHeight,
+    })
+    .jpeg({ quality: 80 })
+    .toBuffer();
+}
+
+async function loadImagesFromHardDrive(): Promise<ReadFilesFromDirResponseType> {
   console.log('Info: Start loading Images from the hard drive');
 
   // Fetch raw images from local folder
@@ -26,35 +68,52 @@ async function mergeImagesFromHardDrive() {
     loadedImages = await readFilesFromDir(
       config.app.outImagesDirPath,
       config.app.filterDuplicateImages, // Hash is only required to filter duplicate images
+      config.app.maxImageCount || undefined,
     );
   } catch (e) {
     console.error("Info: Couldn't find images on hard drive!");
   }
 
   console.log('Info: End loading Images from the hard drive');
-  console.log('Info: Start resizing Images');
 
-  // Resized images (Resized to arrange them better in the canvas later)
-  const resizedImageBuffers: Buffer[] = [];
+  return loadedImages;
+}
+
+async function formatImages(
+  images: ReadFilesFromDirResponseType,
+  size = 400,
+): Promise<FormattedImageType[]> {
+  console.log('Info: Start formatting Images');
+
+  // Formatted images (e.g. Resized to arrange them better in the canvas later)
+  const formattedImages: FormattedImageType[] = [];
   // Key-value pair with the image hash and name(s) (for filtering duplicate images)
   const loadedImageNames: { [key: string]: string[] } = {};
 
-  // Filter duplicate images and resize non duplicate images
-  for (const key of Object.keys(loadedImages)) {
-    const loadedImage = loadedImages[key];
+  for (const key of Object.keys(images)) {
+    const loadedImage = images[key];
     const loadedImageHash = loadedImage.hash;
+
+    // Check whether the same image was already loaded
     if (loadedImageHash == null || loadedImageNames[loadedImageHash] == null) {
       // Resize Image
-      const resizedImage = await sharp(loadedImage.buffer)
-        .resize({
-          fit: sharp.fit.cover,
-          width: 400,
-          height: 400,
-        })
-        .jpeg({ quality: 80 })
-        .toBuffer();
-      resizedImageBuffers.push(resizedImage);
-      // Add image name at image hash to 'loadedImageNames' to check later if the same image exists again
+      const resizedImage = await resizeImage(loadedImage.buffer, size, size);
+
+      // Transform to canvas image
+      const canvasImage = await loadImage(resizedImage);
+
+      // Detect image brightness
+      const brightness = await getImageBrightness(resizedImage, size, size);
+
+      formattedImages.push({
+        hash: loadedImageHash,
+        name: loadedImage.name,
+        brightness,
+        buffer: resizedImage,
+        canvas: canvasImage,
+      });
+
+      // Add image name at image hash to 'loadedImageNames' to check later if the same image exists twice
       if (loadedImageHash != null) {
         loadedImageNames[loadedImageHash] = [loadedImage.name];
       }
@@ -67,23 +126,38 @@ async function mergeImagesFromHardDrive() {
     }
   }
 
-  // Transform image buffers to Canvas-Images
-  const images: { image: Image }[] = [];
-  for (const imageBuffer of resizedImageBuffers) {
-    const image = await loadImage(imageBuffer);
-    images.push({ image });
-  }
+  console.log('Info: End formatting Images');
 
-  console.log('Info: End resizing Images');
+  return formattedImages;
+}
+
+type FormattedImageType = {
+  brightness: number;
+  canvas: Image;
+} & LoadedImageType;
+
+async function mergeImagesFromHardDriveToEvenChunks() {
+  const loadedImages = await loadImagesFromHardDrive();
+  const formattedImages = await formatImages(loadedImages);
+  const sortedImages = formattedImages.sort((a, b) => {
+    if (a.brightness < b.brightness) return -1;
+    if (a.brightness > b.brightness) return 1;
+    return 0;
+  });
+
+  // Transform image buffers to Canvas-Images
+  const canvasImages: { image: Image }[] = sortedImages.map((i) => ({
+    image: i.canvas,
+  }));
 
   // Split images into chunks
   const chunks: { image: Image }[][] = [];
   if (typeof config.app.chunks === 'number' && config.app.chunks > 0) {
     const chunksCount = config.app.chunks;
-    const chunkSize = Math.floor(images.length / chunksCount);
-    for (let i = 0; i < images.length; i += chunkSize) {
-      const chunkImages = images.slice(i, i + chunkSize);
-      // Add only complete chunks as the last one will only contain the remaining images
+    const chunkSize = Math.floor(canvasImages.length / chunksCount);
+    for (let i = 0; i < canvasImages.length; i += chunkSize) {
+      const chunkImages = canvasImages.slice(i, i + chunkSize);
+      // Add only complete chunks as the last one will only contain the remaining images and won't be complete
       if (chunkImages.length === chunkSize) chunks.push(chunkImages);
     }
     console.log('Info: Chunks Data', {
@@ -92,7 +166,7 @@ async function mergeImagesFromHardDrive() {
       chunks: chunks.map((i) => i.length),
     });
   } else {
-    chunks.push(images);
+    chunks.push(canvasImages);
   }
 
   // Strip excessive some images to make the final image chunk an even square
@@ -100,11 +174,12 @@ async function mergeImagesFromHardDrive() {
   const chunkImagesCount = chunkColCount * chunkColCount;
 
   console.log(`Info: Start merging Images`, {
-    importedImagesCount: images.length,
+    importedImagesCount: canvasImages.length,
     colCount: chunkColCount,
     imagesCount: chunkImagesCount * chunks.length,
   });
 
+  // Merge images of chunks
   for (let i = 0; i < chunks.length; i++) {
     const chunk = chunks[i];
     if (chunk.length > 0) {
@@ -135,6 +210,65 @@ async function mergeImagesFromHardDrive() {
   }
 
   console.log('Info: End merging Images');
+}
+
+async function mapToImage() {
+  const name = 'soby2';
+
+  // Load image parts
+  // Note: pa = image part
+  const paImageSize = 100;
+  const loadedImages = await loadImagesFromHardDrive();
+  const paImages = await formatImages(loadedImages, paImageSize);
+
+  // Load image to replace the pixels from
+  // in = input
+  const inImage = await readFile(`${config.app.outPath}/devid.jpg`);
+  const inFormatted = await sharp(inImage)
+    // .grayscale(true)
+    .resize({ width: 200, height: 200 })
+    .jpeg({ quality: 80 })
+    .toBuffer();
+  const inDimensions = sizeOf(inFormatted);
+
+  // Create input image canvas
+  const inCanvas = new Canvas(inDimensions.width, inDimensions.height);
+  const inCtx = inCanvas.getContext('2d');
+  const inImageCanvas = await loadImage(inFormatted);
+  inCtx.drawImage(inImageCanvas, 0, 0);
+  const inImageData = inCtx.getImageData(0, 0, inCanvas.width, inCanvas.height);
+
+  // Create final image canvas
+  const canvas = new Canvas(
+    inDimensions.width * paImageSize,
+    inDimensions.height * paImageSize,
+  );
+  const ctx = canvas.getContext('2d');
+
+  // Iterate through input image and replace the pixels with the most suitable hand
+  for (let y = 0; y < inImageData.height; y++) {
+    for (let x = 0; x < inImageData.width; x++) {
+      const n = y * (inImageData.width * 4) + x * 4;
+
+      const r = inImageData.data[n];
+      const g = inImageData.data[n + 1];
+      const b = inImageData.data[n + 2];
+      const avg = Math.floor((r + g + b) / 3);
+
+      // Get closest grayscale hand image
+      const closest = paImages.reduce(function (prev, curr) {
+        return Math.abs(curr.brightness - avg) < Math.abs(prev.brightness - avg)
+          ? curr
+          : prev;
+      });
+
+      // Draw Image in canvas
+      ctx.drawImage(closest.canvas, x * paImageSize, y * paImageSize);
+    }
+  }
+
+  // Save generated image to the hard drive
+  await writeFile(`${config.app.outPath}/${name}_out.jpeg`, canvas.toBuffer());
 }
 
 async function fetchImages(tweets: TweetsType) {
@@ -291,12 +425,17 @@ async function main() {
       ? new Date(config.app.endTime).toISOString()
       : undefined;
 
-  if (config.app.fetchTweets)
+  // Fetch Tweets
+  if (config.app.fetchTweets) {
     await fetchTweets(client, {
       startTime,
       endTime,
     });
-  await mergeImagesFromHardDrive();
+  }
+
+  // Merge images to chunks
+  // await mergeImagesFromHardDriveToEvenChunks();
+  await mapToImage();
 }
 
 main();

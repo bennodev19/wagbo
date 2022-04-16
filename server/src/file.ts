@@ -33,15 +33,22 @@ export const readDir = async (dirpath: string): Promise<string[]> => {
 export const readFilesFromDir = async (
   dirpath: string,
   createHash = true,
+  limit: number | null = null,
 ): Promise<ReadFilesFromDirResponseType> => {
   const filesObject: ReadFilesFromDirResponseType = {};
   const filesInDir = await readDir(dirpath);
 
+  let loadedCount = 0;
   for (const key in filesInDir) {
     const filename = filesInDir[key];
     const buffer = await readFile(`${dirpath}/${filename}`);
     const hash = createHash ? await hashImageBuffer(buffer, filename) : null;
     filesObject[filename] = { buffer, hash, name: filename };
+    loadedCount++;
+
+    if (limit != null && loadedCount >= limit) {
+      break;
+    }
   }
 
   return filesObject;

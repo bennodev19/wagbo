@@ -426,6 +426,7 @@ async function fetchTweets(
 }
 
 async function main() {
+  const mode: 'combined' | 'image' = 'image' as 'combined' | 'image';
   const client = new TwitterApi(config.twitter.bearerToken || 'unknown');
   const startTime =
     config.app.startTime != null
@@ -445,38 +446,42 @@ async function main() {
   }
 
   // Merge images to chunks
-  // const toMergeImages = await loadImagesFromHardDrive(
-  //   config.app.outImagesDirPath,
-  // );
-  // const toMergeFormattedImages = await formatImages(toMergeImages);
-  // const chunks = await mergeImagesToChunks(toMergeFormattedImages);
-  // for (let i = 0; i < chunks.length; i++) {
-  //   const chunk = chunks[i];
-  //   await writeFile(
-  //     `${config.app.outChunksDirPath}/${config.app.imageName}${
-  //       chunks.length > 1 ? `-${i + 1}` : ''
-  //     }.jpeg`,
-  //     chunk,
-  //   );
-  // }
+  if (mode === 'combined') {
+    const toMergeImages = await loadImagesFromHardDrive(
+      config.app.outImagesDirPath,
+    );
+    const toMergeFormattedImages = await formatImages(toMergeImages);
+    const chunks = await mergeImagesToChunks(toMergeFormattedImages);
+    for (let i = 0; i < chunks.length; i++) {
+      const chunk = chunks[i];
+      await writeFile(
+        `${config.app.outChunksDirPath}/${config.app.imageName}${
+          chunks.length > 1 ? `-${i + 1}` : ''
+        }.jpeg`,
+        chunk,
+      );
+    }
+  }
 
   // Map to Images
-  const toMapImages = await loadImagesFromHardDrive(
-    config.app.outMapImagesDirPath,
-  );
-  for (const key of Object.keys(toMapImages)) {
-    const image = toMapImages[key];
-    const formattedImage = await sharp(image.buffer)
-      // .grayscale(true)
-      .resize({ width: 200, height: 200 })
-      .jpeg({ quality: 80 })
-      .toBuffer();
-
-    const mappedImage = await mapToImage(formattedImage);
-    await writeFile(
-      `${config.app.outMapImagesDirPath}/${image.name}_out.jpeg`,
-      mappedImage,
+  if (mode === 'image') {
+    const toMapImages = await loadImagesFromHardDrive(
+      config.app.outMapImagesDirPath,
     );
+    for (const key of Object.keys(toMapImages)) {
+      const image = toMapImages[key];
+      const formattedImage = await sharp(image.buffer)
+        // .grayscale(true)
+        .resize({ width: 200, height: 200 })
+        .jpeg({ quality: 80 })
+        .toBuffer();
+
+      const mappedImage = await mapToImage(formattedImage);
+      await writeFile(
+        `${config.app.outMapImagesDirPath}/${image.name}_out.jpeg`,
+        mappedImage,
+      );
+    }
   }
 }
 
